@@ -1,0 +1,459 @@
+// LuxeDrive — Prisma Database Schema
+// PostgreSQL via Railway / Supabase
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING_VERIFICATION
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  RENTED
+  MAINTENANCE
+  INACTIVE
+}
+
+enum TransmissionType {
+  AUTOMATIC
+  MANUAL
+}
+
+enum FuelType {
+  PETROL
+  DIESEL
+  ELECTRIC
+  HYBRID
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  REJECTED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum PaymentMethod {
+  PAYSTACK
+  STRIPE
+  BANK_TRANSFER
+  CASH
+}
+
+enum ScheduleType {
+  PICKUP
+  DROPOFF
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum NotificationType {
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  PAYMENT_RECEIVED
+  PAYMENT_FAILED
+  PICKUP_REMINDER
+  DROPOFF_REMINDER
+  REVIEW_REQUEST
+  ANNOUNCEMENT
+  PROMO
+}
+
+// ─────────────────────────────────────────────
+// USERS
+// ─────────────────────────────────────────────
+
+model User {
+  id                String     @id @default(uuid())
+  email             String     @unique
+  phone             String?    @unique
+  firstName         String
+  lastName          String
+  passwordHash      String
+  role              UserRole   @default(CUSTOMER)
+  status            UserStatus @default(PENDING_VERIFICATION)
+  avatarUrl         String?
+  emailVerified     Boolean    @default(false)
+  phoneVerified     Boolean    @default(false)
+  emailVerifyToken  String?
+  passwordResetToken String?
+  passwordResetExpiry DateTime?
+  driverLicenseUrl  String?
+  driverLicenseVerified Boolean @default(false)
+  loyaltyPoints     Int        @default(0)
+  referralCode      String?    @unique
+  referredById      String?
+  referredBy        User?      @relation("Referrals", fields: [referredById], references: [id])
+  referrals         User[]     @relation("Referrals")
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  bookings          Booking[]
+  payments          Payment[]
+  reviews           Review[]
+  savedVehicles     SavedVehicle[]
+  notifications     Notification[]
+  supportTickets    SupportTicket[]
+  loyaltyTransactions LoyaltyTransaction[]
+
+  @@index([email])
+  @@index([phone])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────
+// VEHICLES
+// ─────────────────────────────────────────────
+
+model Vehicle {
+  id                String          @id @default(uuid())
+  title             String
+  brand             String
+  model             String
+  year              Int
+  slug              String          @unique
+  description       String
+  transmission      TransmissionType
+  fuelType          FuelType
+  seatingCapacity   Int
+  dailyPrice        Decimal         @db.Decimal(10, 2)
+  weeklyPrice       Decimal?        @db.Decimal(10, 2)
+  monthlyPrice      Decimal?        @db.Decimal(10, 2)
+  status            VehicleStatus   @default(AVAILABLE)
+  hasGPS            Boolean         @default(false)
+  hasInsurance      Boolean         @default(true)
+  insuranceDetails  String?
+  color             String?
+  licensePlate      String?         @unique
+  mileage           Int?
+  features          String[]
+  pickupLocations   String[]
+  isFeatured        Boolean         @default(false)
+  metaTitle         String?
+  metaDescription   String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  images            VehicleImage[]
+  bookings          Booking[]
+  reviews           Review[]
+  savedBy           SavedVehicle[]
+  schedules         Schedule[]
+
+  @@index([status])
+  @@index([brand])
+  @@index([dailyPrice])
+  @@map("vehicles")
+}
+
+model VehicleImage {
+  id         String   @id @default(uuid())
+  vehicleId  String
+  vehicle    Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  url        String
+  publicId   String   // Cloudinary public ID
+  isPrimary  Boolean  @default(false)
+  order      Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@map("vehicle_images")
+}
+
+// ─────────────────────────────────────────────
+// BOOKINGS
+// ─────────────────────────────────────────────
+
+model Booking {
+  id               String        @id @default(uuid())
+  reference        String        @unique // e.g. LXD-2024-000123
+  userId           String
+  user             User          @relation(fields: [userId], references: [id])
+  vehicleId        String
+  vehicle          Vehicle       @relation(fields: [vehicleId], references: [id])
+  status           BookingStatus @default(PENDING)
+
+  pickupDate       DateTime
+  dropoffDate      DateTime
+  pickupLocation   String
+  dropoffLocation  String
+  rentalDays       Int
+  
+  baseAmount       Decimal       @db.Decimal(10, 2)
+  taxAmount        Decimal       @db.Decimal(10, 2)  @default(0)
+  serviceFee       Decimal       @db.Decimal(10, 2)  @default(0)
+  discountAmount   Decimal       @db.Decimal(10, 2)  @default(0)
+  totalAmount      Decimal       @db.Decimal(10, 2)
+
+  couponId         String?
+  coupon           Coupon?       @relation(fields: [couponId], references: [id])
+  
+  notes            String?
+  adminNotes       String?
+  cancellationReason String?
+  cancelledAt      DateTime?
+
+  driverAssigned   String?
+  
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  payment          Payment?
+  schedules        Schedule[]
+  review           Review?
+
+  @@index([userId])
+  @@index([vehicleId])
+  @@index([status])
+  @@index([pickupDate])
+  @@map("bookings")
+}
+
+// ─────────────────────────────────────────────
+// PAYMENTS
+// ─────────────────────────────────────────────
+
+model Payment {
+  id              String        @id @default(uuid())
+  bookingId       String        @unique
+  booking         Booking       @relation(fields: [bookingId], references: [id])
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+  
+  amount          Decimal       @db.Decimal(10, 2)
+  currency        String        @default("NGN")
+  method          PaymentMethod
+  status          PaymentStatus @default(PENDING)
+  
+  paystackRef     String?       @unique
+  paystackTxId    String?
+  stripePaymentId String?
+  
+  paidAt          DateTime?
+  refundedAt      DateTime?
+  refundAmount    Decimal?      @db.Decimal(10, 2)
+  refundReason    String?
+  
+  receiptUrl      String?
+  metadata        Json?
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("payments")
+}
+
+// ─────────────────────────────────────────────
+// SCHEDULES (Pickup & Dropoff)
+// ─────────────────────────────────────────────
+
+model Schedule {
+  id          String       @id @default(uuid())
+  bookingId   String
+  booking     Booking      @relation(fields: [bookingId], references: [id])
+  vehicleId   String
+  vehicle     Vehicle      @relation(fields: [vehicleId], references: [id])
+  type        ScheduleType
+  scheduledAt DateTime
+  location    String
+  driverName  String?
+  driverPhone String?
+  notes       String?
+  completed   Boolean      @default(false)
+  completedAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([vehicleId])
+  @@index([scheduledAt])
+  @@map("schedules")
+}
+
+// ─────────────────────────────────────────────
+// REVIEWS
+// ─────────────────────────────────────────────
+
+model Review {
+  id          String   @id @default(uuid())
+  bookingId   String   @unique
+  booking     Booking  @relation(fields: [bookingId], references: [id])
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  vehicleId   String
+  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id])
+  rating      Int      // 1–5
+  title       String?
+  body        String
+  isPublished Boolean  @default(true)
+  adminReply  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([vehicleId])
+  @@index([userId])
+  @@map("reviews")
+}
+
+// ─────────────────────────────────────────────
+// SAVED VEHICLES (Wishlist)
+// ─────────────────────────────────────────────
+
+model SavedVehicle {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  vehicleId String
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, vehicleId])
+  @@map("saved_vehicles")
+}
+
+// ─────────────────────────────────────────────
+// COUPONS
+// ─────────────────────────────────────────────
+
+model Coupon {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  description     String?
+  discountType    String    // "PERCENTAGE" | "FIXED"
+  discountValue   Decimal   @db.Decimal(10, 2)
+  minBookingValue Decimal?  @db.Decimal(10, 2)
+  maxDiscount     Decimal?  @db.Decimal(10, 2)
+  usageLimit      Int?
+  usedCount       Int       @default(0)
+  isActive        Boolean   @default(true)
+  expiresAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  bookings        Booking[]
+
+  @@map("coupons")
+}
+
+// ─────────────────────────────────────────────
+// NOTIFICATIONS
+// ─────────────────────────────────────────────
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean          @default(false)
+  data      Json?
+  createdAt DateTime         @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────────
+// SUPPORT TICKETS
+// ─────────────────────────────────────────────
+
+model SupportTicket {
+  id          String        @id @default(uuid())
+  userId      String
+  user        User          @relation(fields: [userId], references: [id])
+  subject     String
+  message     String
+  status      TicketStatus  @default(OPEN)
+  priority    String        @default("MEDIUM") // LOW | MEDIUM | HIGH | URGENT
+  assignedTo  String?
+  resolution  String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  replies     TicketReply[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("support_tickets")
+}
+
+model TicketReply {
+  id        String        @id @default(uuid())
+  ticketId  String
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id])
+  senderId  String
+  senderRole String       // "USER" | "ADMIN"
+  message   String
+  createdAt DateTime      @default(now())
+
+  @@map("ticket_replies")
+}
+
+// ─────────────────────────────────────────────
+// LOYALTY
+// ─────────────────────────────────────────────
+
+model LoyaltyTransaction {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  points      Int
+  type        String   // "EARN" | "REDEEM"
+  description String
+  bookingId   String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@map("loyalty_transactions")
+}
+
+// ─────────────────────────────────────────────
+// SITE SETTINGS
+// ─────────────────────────────────────────────
+
+model SiteSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  type      String   @default("string") // "string" | "number" | "boolean" | "json"
+  group     String   @default("general")
+  updatedAt DateTime @updatedAt
+
+  @@map("site_settings")
+}
